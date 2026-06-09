@@ -1,4 +1,4 @@
-digraph MyWorkflow {
+digraph FirstWorkflow {
     graph [goal="Describe the project"]
     rankdir=LR
 
