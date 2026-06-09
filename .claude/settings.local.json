@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(fabro model *)",
+      "Bash(fabro settings *)"
+    ]
+  }
+}
