@@ -1,0 +1,45 @@
+digraph HumanInTheLoop {
+    graph [goal="Generate a quality-validated short essay on an AI-proposed topic with human approval and automated scoring"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    // Initial topic proposal
+    propose_topic [label="Propose Topic", prompt="Suggest an interesting topic for a short science essay (up to 5 sentences). Explain why this topic would be interesting to write about."]
+
+    // Human decision point
+    approval_gate [shape=hexagon, label="Approve Topic"]
+
+    // Approved path - generate essay
+    generate_essay [label="Generate Essay", max_visits=4, prompt="Write a short essay on the approved science topic. Keep it to 5 sentences maximum. Save it to a file named <topic>_essey.md in the essey/ directory (create the directory if it doesn't exist).\n\nBASE REQUIREMENTS (always apply):\n- Always attach at least 3 source links in a dedicated ## Sources section\n- Ensure the essay directly addresses all key concepts from the approved topic\n- Use credible sources (academic journals, reputable science websites)\n\nRETRY ENHANCEMENT:\nIf you can access previous score_essay feedback, review it and address the specific issues mentioned (topic coverage or source count). Otherwise, focus on meeting all base requirements above."]
+
+    // Quality gate - score the essay
+    score_essay [label="Score Essay", prompt="Evaluate the essay file against the approved topic. Read the generated essay file from the essey/ directory (look for files matching essey/*_essey.md, use the most recently created one).\n\nApproved topic: Use the topic from the approval_gate response.\n\nScoring Criteria:\n1. Topic Correspondence (threshold: 6/10)\n   - Does the essay directly address the stated topic?\n   - Are main concepts from the topic covered?\n   - Is the information accurate and relevant?\n   - Score on a scale of 0-10.\n\n2. Source Attachment (threshold: 3 sources minimum)\n   - Count distinct URLs in the Sources or References section\n   - Accept formats: [text](url), raw URLs, list items with links\n   - Must find at least 3 unique URLs\n\nProvide your evaluation in this exact format:\nTOPIC_SCORE: [0-10]\nSOURCE_COUNT: [integer]\nRESULT: [PASS or FAIL]\nFEEDBACK: [specific guidance on what failed, if applicable]\n\nIf both criteria are met (topic_score >= 6 AND source_count >= 3), return RESULT: PASS.\nOtherwise return RESULT: FAIL with specific feedback."]
+
+    // Failure reporting - triggered when generate_essay exhausts max_visits (4 attempts)
+    // This node receives control when score_essay continues to return FAIL until generate_essay
+    // reaches its max_visits limit, at which point Fabro routes to this edge with outcome=failed
+    report_failure [label="Report Quality Failure", prompt="The essay failed quality validation after 4 total generation attempts (max_visits limit reached).\n\nAnalyze the most recent score_essay output to extract scores and issues. If the output format is missing or malformed (e.g., missing TOPIC_SCORE, SOURCE_COUNT, or RESULT fields), report this as a scoring error and recommend manual inspection of the essay file.\n\nFor properly formatted scores:\n- Extract final topic score\n- Extract final source count\n- Identify specific issues from FEEDBACK\n\nReport that the workflow could not generate an acceptable essay. Provide the final scores (if available) and recommend either:\n1. Manual review of the generated essay file\n2. Adjusting the topic to be more specific\n3. Relaxing quality thresholds in the workflow configuration\n\nBe specific about which criteria failed or if scoring itself encountered errors."]
+
+    // Rejected path - just end
+    acknowledge_rejection [label="Acknowledge Rejection", prompt="The topic was rejected. Acknowledge that we will not proceed with essay generation."]
+
+    // Flow
+    start -> propose_topic -> approval_gate
+
+    // Branching based on human decision
+    approval_gate -> generate_essay [label="[A] Approve"]
+    approval_gate -> acknowledge_rejection [label="[R] Reject"]
+
+    // Paths converge to exit
+    generate_essay -> score_essay
+    score_essay -> exit [label="[PASS]"]
+    score_essay -> generate_essay [label="[FAIL, retry]"]
+
+    // Edge condition routing: When generate_essay reaches max_visits=4, Fabro automatically
+    // sets outcome=failed. This condition triggers routing to report_failure instead of retrying.
+    score_essay -> report_failure [label="[FAIL, exhausted]", condition="outcome=failed"]
+    report_failure -> exit
+    acknowledge_rejection -> exit
+}

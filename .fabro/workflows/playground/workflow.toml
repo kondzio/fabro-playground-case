@@ -1,0 +1,30 @@
+_version = 1
+
+[workflow]
+graph = "playground.fabro"
+
+[run.environment]
+id = "local"
+
+[environments.local]
+provider = "local"
+
+# Quality gate configuration for essay validation workflow
+# Controls the criteria and retry behavior for essay acceptance
+[workflow.metadata]
+
+# Maximum number of retry attempts if essay fails validation
+# Total attempts = max_retries + 1 (initial attempt)
+# Valid range: non-negative integer (typical: 1-5)
+max_retries = "3"
+
+# Minimum topic correspondence score required for essay acceptance
+# Scale: 0-10, where 10 is perfect topic match
+# Essays scoring below this threshold will be rejected
+# Valid range: 0-10 (typical: 5-8 for balanced quality)
+topic_score_threshold = "6"
+
+# Minimum number of distinct URL sources required in the essay
+# Ensures essays are research-based with adequate citations
+# Valid range: positive integer (typical: 2-5)
+min_sources = "3"
