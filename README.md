@@ -128,3 +128,42 @@ You can monitor, inspect, and visualize active or completed workflow runs using 
   ```bash
   fabro graph .fabro/workflows/hello/workflow.fabro -o hello-graph.svg
   ```
+
+---
+
+## Jira MCP Server Setup
+
+The Jira MCP server (`tools/jira_mcp_server.py`) exposes 15 Jira tools to all Fabro workflows.
+
+### 1. Install dependencies
+
+```bash
+pip install -r tools/requirements.txt
+```
+
+### 2. Configure user-level Fabro settings
+
+Add the following to `~/.fabro/settings.toml` (create the file if it doesn't exist), replacing the placeholder values with your actual Jira credentials and the absolute path to this repository:
+
+```toml
+[run.agent.mcps.jira]
+type = "stdio"
+command = ["python3", "/absolute/path/to/fabro-playground-case/tools/jira_mcp_server.py"]
+startup_timeout = "15s"
+tool_timeout = "30s"
+
+[run.agent.mcps.jira.env]
+JIRA_BASE_URL = "https://your-org.atlassian.net"
+JIRA_EMAIL = "your@email.com"
+JIRA_API_TOKEN = "your-api-token"
+```
+
+Get a Jira API token from: https://id.atlassian.com/manage-profile/security/api-tokens
+
+### 3. Run the demo workflow
+
+Edit `.fabro/workflows/jira-demo/workflow.toml` to set your `project_key`, then:
+
+```bash
+fabro run --workflow jira-demo
+```

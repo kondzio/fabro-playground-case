@@ -1,0 +1,16 @@
+_version = 1
+
+[workflow]
+graph = "jira-demo.fabro"
+
+[run]
+goal = "Summarize open Jira tickets"
+
+[run.inputs]
+project_key = "EPMGPOCPG"
+
+[run.environment]
+id = "local"
+
+[environments.local]
+provider = "local"

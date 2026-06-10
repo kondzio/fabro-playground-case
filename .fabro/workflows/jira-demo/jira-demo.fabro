@@ -1,0 +1,25 @@
+digraph JiraMCPDemo {
+    graph [goal="Summarize open tickets in a Jira project"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    fetch [
+        label="Fetch",
+        prompt="Use the jira_search_by_jql tool to find the 10 most recently updated open tickets in project {{ inputs.project_key }}. Use JQL: project = {{ inputs.project_key }} AND status != Done ORDER BY updated DESC. Save the ticket keys, summaries, and statuses to jira_results.md."
+    ]
+
+    summarize [
+        label="Summarize",
+        shape=tab,
+        prompt="Read jira_results.md and write a concise summary of the open tickets, grouped by status. List each group with a count and the ticket keys."
+    ]
+
+    comments [
+        label="Comments",
+        prompt="For every jira ticket from jira_results.md list add a comment: 'fabro was here' with jira_post_comment tool."
+    ]
+
+    start -> fetch -> summarize -> comments -> exit
+}
