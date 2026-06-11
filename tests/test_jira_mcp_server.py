@@ -218,6 +218,37 @@ class TestUpdateTools:
         result = server.jira_update_description("TEST-1", "desc")
         assert result.startswith("Error:")
 
+    def test_update_ticket_puts_json_body(self, mock_client):
+        mock_client.request.return_value = {}
+        result = server.jira_update_ticket("TEST-1", '{"fields": {"customfield_12700": "AC text"}}')
+        call_args = mock_client.request.call_args
+        assert call_args[0] == ("PUT", "issue/TEST-1")
+        assert call_args[1]["json"] == {"fields": {"customfield_12700": "AC text"}}
+        assert "TEST-1" in result
+
+    def test_update_ticket_propagates_error(self, mock_client):
+        mock_client.request.return_value = "Error: Jira authentication failed."
+        result = server.jira_update_ticket("TEST-1", '{"fields": {}}')
+        assert result.startswith("Error:")
+
+    def test_update_ticket_invalid_json_returns_error(self, mock_client):
+        result = server.jira_update_ticket("TEST-1", "not valid json")
+        assert result.startswith("Error:")
+        mock_client.request.assert_not_called()
+
+    def test_add_label_puts_update_body(self, mock_client):
+        mock_client.request.return_value = {}
+        result = server.jira_add_label("TEST-1", "my-label")
+        call_args = mock_client.request.call_args
+        assert call_args[0] == ("PUT", "issue/TEST-1")
+        assert call_args[1]["json"] == {"update": {"labels": [{"add": "my-label"}]}}
+        assert "TEST-1" in result
+
+    def test_add_label_propagates_error(self, mock_client):
+        mock_client.request.return_value = "Error: Jira authentication failed."
+        result = server.jira_add_label("TEST-1", "my-label")
+        assert result.startswith("Error:")
+
     def test_assign_ticket_puts_to_assignee(self, mock_client):
         mock_client.request.return_value = {}
         result = server.jira_assign_ticket_to("TEST-1", "acc123")
@@ -366,7 +397,7 @@ class TestFormatAndExtractText:
 
 
 class TestMcpRegistration:
-    def test_all_15_tools_registered(self):
+    def test_all_17_tools_registered(self):
         tool_names = set(server.mcp._tool_manager._tools.keys())
         expected = {
             "jira_search_by_jql",
@@ -384,5 +415,7 @@ class TestMcpRegistration:
             "jira_get_transitions",
             "jira_get_components",
             "jira_get_fix_versions",
+            "jira_update_ticket",
+            "jira_add_label",
         }
         assert expected == tool_names
