@@ -31,6 +31,11 @@ digraph RefineEpic {
         prompt="Call jira_add_label with key {{ inputs.issue_key }} and label 'refinment_failure' to mark the epic as failed to refine."
     ]
 
+    outcome [
+        label="Outcome",
+        prompt="State whether refinement for {{ inputs.issue_key }} succeeded or failed based on what labels were applied."
+    ]
+
     start -> fetch
     fetch -> refine [condition="outcome=succeeded"]
     fetch -> label_failure
@@ -38,6 +43,7 @@ digraph RefineEpic {
     refine -> label_failure
     update_jira -> label_success [condition="outcome=succeeded"]
     update_jira -> label_failure
-    label_success -> exit
-    label_failure -> exit
+    label_success -> outcome
+    label_failure -> outcome
+    outcome -> exit
 }

@@ -1,0 +1,32 @@
+digraph FullSdlc {
+    graph [goal="Run the full SDLC workflow for a Jira issue"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare,  label="Exit"]
+
+    refine_epic [import="../refine-epic/refine-epic.fabro"]
+
+    quality_gate [
+        shape=hexagon,
+        label="Refinement Quality Gate"
+    ]
+
+    label_success [
+        label="Label Success",
+        prompt="Call jira_add_label with key {{ inputs.issue_key }} and label 'full_sdlc_approved'."
+    ]
+
+    label_failure [
+        label="Label Failure",
+        prompt="Call jira_add_label with key {{ inputs.issue_key }} and label 'full_sdlc_rejected'."
+    ]
+
+    start        -> refine_epic
+    refine_epic  -> quality_gate
+    quality_gate -> label_success [label="[A] Approve"]
+    quality_gate -> label_failure [label="[R] Reject"]
+    quality_gate -> refine_epic   [label="[T] Retry"]
+    label_success -> exit
+    label_failure -> exit
+}

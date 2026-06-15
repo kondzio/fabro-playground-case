@@ -16,6 +16,24 @@ class JiraClient:
         base_url = (os.environ.get("JIRA_BASE_URL") or os.environ.get("JIRA_BASE_PATH") or "").rstrip("/")
         email = os.environ.get("JIRA_EMAIL", "")
         token = os.environ.get("JIRA_API_TOKEN", "")
+
+        # If any is missing/redacted, try to load from .fabro/project.toml
+        if not os.environ.get("PYTEST_CURRENT_TEST") and (not base_url or not email or not token or token == "REDACTED" or base_url == "REDACTED" or email == "REDACTED"):
+            try:
+                import toml
+                proj_toml_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".fabro", "project.toml")
+                if os.path.exists(proj_toml_path):
+                    config = toml.load(proj_toml_path)
+                    env_config = config.get("run", {}).get("agent", {}).get("mcps", {}).get("jira", {}).get("env", {})
+                    if not base_url or base_url == "REDACTED":
+                        base_url = env_config.get("JIRA_BASE_URL", base_url).rstrip("/")
+                    if not email or email == "REDACTED":
+                        email = env_config.get("JIRA_EMAIL", email)
+                    if not token or token == "REDACTED":
+                        token = env_config.get("JIRA_API_TOKEN", token)
+            except Exception:
+                pass
+
         missing = []
         if not base_url:
             missing.append("JIRA_BASE_URL")
