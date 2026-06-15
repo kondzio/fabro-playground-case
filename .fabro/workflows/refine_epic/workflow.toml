@@ -1,7 +1,7 @@
 _version = 1
 
 [workflow]
-graph = "refine-epic.fabro"
+graph = "refine_epic.fabro"
 
 [run]
 goal = "Refine Jira Epic"

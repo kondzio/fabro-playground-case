@@ -5,7 +5,7 @@ digraph FullSdlc {
     start [shape=Mdiamond, label="Start"]
     exit  [shape=Msquare,  label="Exit"]
 
-    refine_epic [import="../refine-epic/refine-epic.fabro"]
+    refine_epic [import="../refine_epic/refine_epic.fabro"]
 
     quality_gate [
         shape=hexagon,
