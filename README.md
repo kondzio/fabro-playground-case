@@ -167,3 +167,53 @@ Edit `.fabro/workflows/jira-demo/workflow.toml` to set your `project_key`, then:
 ```bash
 fabro run --workflow jira-demo
 ```
+
+---
+
+## Gemini API Key Setup
+
+The Fabro server uses the `GEMINI_API_KEY` environment variable to access Google's Gemini API. The key is restricted by IP address to the server's egress IP for security.
+
+### Current Configuration
+
+- **Server**: `https://fabro.ai-x-a-accelerate.lab.epam.com`
+- **Cluster**: AWS EKS `epam-gpoc-eks` (us-east-1, account `711156763240`)
+- **Egress IP**: `44.220.89.190` (NAT Gateway Elastic IP)
+- **GCP Project**: `711156763240`
+
+### Generating or Regenerating the API Key
+
+1. Go to **GCP Console → APIs & Services → Credentials**
+2. Click **Create Credentials → API key**
+3. Click **Edit API key** (pencil icon) on the newly created key
+4. Under **Application restrictions**, select **IP addresses**
+5. Add the server egress IP in CIDR notation:
+   ```
+   44.220.89.190/32
+   ```
+6. Under **API restrictions**, select **Restrict key**, then choose:
+   - **Generative Language API**
+7. Click **Save**
+8. Copy the key and update the `GEMINI_API_KEY` environment variable on the Fabro server
+
+### Updating the Key on the Server
+
+Set the new key as a Kubernetes secret or environment variable in the `fabro` namespace:
+
+```bash
+kubectl set env deployment/fabro GEMINI_API_KEY=<your-new-key> -n fabro
+```
+
+### If the Egress IP Changes
+
+If the NAT Gateway IP changes (e.g., after infrastructure recreation):
+
+1. Find the new egress IP by running from inside the fabro pod:
+   ```bash
+   kubectl exec -it <fabro-pod-name> -n fabro -- wget -qO- https://ifconfig.me/ip
+   ```
+   Or check in AWS Console: **VPC → NAT Gateways → Elastic IP**
+
+2. Go to **GCP Console → APIs & Services → Credentials**
+3. Edit the existing API key and update the IP address restriction to `<new-ip>/32`
+4. Save — no need to regenerate the key itself
