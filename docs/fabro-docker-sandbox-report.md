@@ -125,33 +125,84 @@ Resources are released immediately when the container is force-removed (kernel c
 
 ---
 
-## 4. Output Collection
+## 4. Command Execution
 
-Commands run via `docker exec` with attached stdout/stderr streams.
+The container runs `sleep infinity` as its entrypoint — all actual work happens via `docker exec` calls using the `bollard` Rust crate. Three distinct execution paths exist.
 
-### Three execution modes
-| Mode | Behavior | Used for |
-|---|---|---|
-| `docker_exec()` | blocks, collects full output | internal setup |
-| `docker_exec_streaming()` | streams via async callback | live output |
-| `docker_exec_shell_streaming()` | streaming + timeout + cancellation | actual node execution |
+### Path 1 — Simple exec (`docker_exec`, `docker.rs:276`)
 
-### ExecResult structure
+Used for **internal operations**: git clone, workspace mkdir, health check, `cat`/`test`/`find` file ops.
+
+```
+bollard.create_exec(cmd=["/bin/bash", "-c", command], attach_stdout, attach_stderr)
+  → bollard.start_exec()
+  → collect stdout/stderr strings
+  → bollard.inspect_exec() to get exit code
+```
+
+Blocking — waits for full output before returning.
+
+### Path 2 — Streaming exec (`docker_exec_shell_streaming`, `docker.rs:455`)
+
+Used for **every agent node command** that needs live output. Every command is wrapped in `docker_controlled_shell_command` (`docker.rs:838`) before being sent to `docker exec`:
+
+```bash
+# Simplified structure of the generated wrapper:
+stop_file=/tmp/fabro-exec-{pid}-{nonce}-{seq}.stop
+pid_file=...
+
+if [ -e "$stop_file" ]; then exit 143; fi        # pre-cancelled check
+
+# Background watcher signals the process group when stop_file appears
+( while [ ! -e "$stop_file" ]; do sleep 0.1; done
+  kill -TERM -$child; sleep 0.2; kill -KILL -$child ) &
+
+setsid /bin/bash -lc "$user_command" &            # new process group
+echo $! > "$pid_file"
+wait $child
+```
+
+Output is streamed chunk-by-chunk via `CommandOutputCallback` as `LogOutput::StdOut`/`LogOutput::StdErr` frames. `tokio::select!` races the output task against timeout/cancellation futures.
+
+### Path 3 — Stdio process (`spawn_stdio_process`, `docker.rs:1564`)
+
+Used for **MCP servers** (e.g. Jira MCP in `settings.toml`). Same stop-file wrapper as Path 2, but exec is started with `attach_stdin: true` and bidirectional pipes:
+
+```
+bollard.start_exec(attach_stdin=true, attach_stdout=true, attach_stderr=true, tty=false)
+  → (input: AsyncWrite, output: Stream<LogOutput>)
+```
+
+A Tokio task fans out the output stream:
+- `StdOut` bytes → `duplex` pipe (MCP client reads from this as its `stdout`)
+- `StdErr` bytes → `StderrCollector` (ring-buffer, surfaced on error)
+
+`StdioProcessHandle` wraps a `DockerStdioProcessControl` that can `terminate()` (via stop-file) or `wait()` (polls `inspect_exec` every second).
+
+### Result type
+
 ```rust
 ExecResult {
     stdout: String,
     stderr: String,
-    exit_code: Option<i32>,
-    termination: CommandTermination,  // Normal | TimedOut | Cancelled
+    exit_code: Option<i32>,         // None if timed out or cancelled
+    termination: CommandTermination, // Exited | TimedOut | Cancelled
     duration_ms: u64,
 }
 ```
 
-### Log tail
-Last **8,192 bytes (8 KB)** retained for error display (`DEFAULT_EXEC_OUTPUT_TAIL_BYTES`). Full output is NOT buffered in memory — it is streamed through and discarded unless collected by a callback.
+Last **8,192 bytes (8 KB)** retained for error display (`DEFAULT_EXEC_OUTPUT_TAIL_BYTES`). Full output is NOT buffered in memory — streamed through and discarded unless collected by a callback.
 
-### File transfers
-Files pulled from container: `docker.download_from_container()` via tar archive.
+### File I/O
+
+| Operation | Mechanism |
+|---|---|
+| Read file | `docker exec cat <path>` (Path 1) |
+| Write file to container | `docker.upload_to_container()` — tar stream via Docker API |
+| Download file from container | `docker.download_from_container()` — tar stream via Docker API |
+| Upload file from host | `docker.upload_to_container()` — tar stream |
+
+Write/upload go through Docker's archive API, not `docker exec` — bypasses shell quoting and handles binary content correctly.
 
 ---
 
@@ -163,12 +214,26 @@ Files pulled from container: `docker.download_from_container()` via tar archive.
 - Defaults: git clone = 300s, setup commands = 30s, general commands = 60s (all configurable per node)
 
 ### In-container cancellation via stop files (`docker.rs:838-879`)
-Fabro cannot SIGTERM a `docker exec` from outside the container, so it uses a stop-file mechanism inside:
+Fabro cannot SIGTERM a `docker exec` from outside the container (Docker has no API for it). Instead, every streaming command (Paths 2 and 3 from Section 4) is wrapped in a shell that monitors a stop file inside the container:
 
-1. Each exec creates `/tmp/fabro-exec-{pid}-{nonce}-{seq}.stop` and `.pid` files
-2. A bash watcher loop polls for the stop file (every 100ms prod, 5ms tests)
-3. When stop file appears: `kill -TERM -{pgid}` → 200ms grace → `kill -KILL -{pgid}`
-4. Uses `setsid` so the kill covers the entire process group/tree
+1. Two temp files are created per exec: `/tmp/fabro-exec-{pid}-{nonce}-{seq}.stop` and `.pid` (sequence number from an `AtomicU64`, so concurrent execs never collide)
+2. The user command runs via `setsid` — new process group
+3. A bash watcher loop polls the stop file every 100ms (5ms in tests)
+4. When stop file appears: `kill -TERM -{pgid}` → 200ms grace → `kill -KILL -{pgid}`
+5. `setsid` ensures the kill signal covers the entire process group/tree
+
+**How Fabro creates the stop file** (`request_docker_exec_stop`, `docker.rs:529`): a separate `docker exec` call runs `touch <stop_file>` inside the container. This is the only way to signal a running exec from outside.
+
+Full timeout/cancel flow:
+```
+timeout fires or cancel_token cancelled
+  → request_docker_exec_stop()
+      → docker exec touch /tmp/fabro-exec-<id>.stop
+          → watcher sends SIGTERM to process group
+          → after 200ms grace, SIGKILL
+  → output_task.await (drains remaining output)
+  → returns ExecResult { termination: TimedOut | Cancelled, exit_code: None }
+```
 
 ### Container identity verification (`docker.rs:1153-1173`)
 Before **every** operation, Fabro verifies labels:
