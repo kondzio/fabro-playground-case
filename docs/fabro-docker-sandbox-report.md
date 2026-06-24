@@ -372,7 +372,89 @@ RUN START
 
 ---
 
-## 10. Key Source Files
+## 10. MCP Server Support
+
+Fabro supports three MCP transport types configured under `[run.agent.mcps.<name>]` in `settings.toml`. The type is set via the `type` field.
+
+### Transport 1 — `stdio`
+
+```toml
+[run.agent.mcps.jira]
+type = "stdio"
+command = ["python3", "/opt/jira_mcp_server.py"]
+startup_timeout = "15s"
+tool_timeout = "90s"
+
+[run.agent.mcps.jira.env]
+JIRA_BASE_URL  = "vault:JIRA_BASE_URL"
+JIRA_API_TOKEN = "vault:JIRA_API_TOKEN"
+```
+
+The MCP server process is launched **inside the sandbox container** via `spawn_stdio_process` (Section 4, Path 3): `docker exec` with `attach_stdin=true` creates a bidirectional pipe. The `rmcp` SDK's `TokioChildProcess` transport handles the MCP protocol over stdin/stdout.
+
+This is the transport used by the Jira MCP server in the current deployment.
+
+### Transport 2 — `http`
+
+```toml
+[run.agent.mcps.my_remote]
+type = "http"
+url = "https://my-mcp-server.example.com/mcp"
+
+[run.agent.mcps.my_remote.headers]
+Authorization = "Bearer {{ vars.TOKEN }}"
+```
+
+Connects to an **already-running remote MCP server** over HTTP. Fabro connects from the Fabro host process (not from inside the sandbox container). Two sub-protocols are supported via the optional `protocol` field:
+
+| `protocol` | Default | Transport |
+|---|---|---|
+| `streamable_http` | yes | MCP Streamable HTTP (`StreamableHttpClientTransport`) |
+| `sse` | no | MCP over Server-Sent Events (`SseClientTransport`) |
+
+### Transport 3 — `sandbox`
+
+```toml
+[run.agent.mcps.my_http_server]
+type = "sandbox"
+command = ["node", "mcp-server.js"]
+port = 8080
+protocol = "streamable_http"   # or "sse"
+```
+
+Starts an HTTP MCP server **inside the sandbox container**, then connects to it over HTTP from Fabro. Useful when the MCP server needs access to the workspace filesystem or other sandbox resources. Startup flow (`session.rs:705`):
+
+1. `setsid sh -c "<command> >/tmp/mcp_server_stdout.log 2>/tmp/mcp_server_stderr.log" &` — launched detached inside the container via `exec_command`
+2. Polls `ss -tln | grep -q ':{port}'` inside the container every second, up to 30s
+3. Resolves the sandbox's preview URL for that port (falls back to `http://localhost:{port}`)
+4. **Rewrites config to `McpTransport::Http`** before passing to `McpClient` — the `Sandbox` variant is never connected directly (`client.rs:101` panics if it reaches connection without resolution)
+
+> **Note**: `sandbox` transport is only meaningful when there is a preview/tunnel mechanism that makes the container port reachable from Fabro. For the Docker sandbox on EKS, `http://localhost:{port}` is used — the Fabro process and the container share the pod network namespace via DinD, so this works only if the MCP server inside the container is reachable from the Fabro container. In standard Docker networking, the container has its own IP; use `http://{container_ip}:{port}` or configure network accordingly.
+
+### How MCP tools are exposed to the agent
+
+All three transports converge at `McpConnectionManager` (`connection_manager.rs`). After startup, `list_tools()` is called on each server and each tool is registered with a qualified name:
+
+```
+mcp__{server_name}__{tool_name}
+```
+
+Special characters in server/tool names are replaced with `_`. The agent sees these as ordinary tools — no distinction between stdio, http, or sandbox at call time. `McpConnectionManager.call_tool()` routes by qualified name to the right client.
+
+### MCP server lifecycle
+
+| Phase | stdio | http | sandbox |
+|---|---|---|---|
+| Start | `docker exec` (stdin/stdout pipe) | HTTP connect (no start) | `docker exec setsid ...` + port poll |
+| Ready check | MCP handshake timeout | MCP handshake timeout | `ss -tln` port check (30s) then MCP handshake |
+| Shutdown | stop-file signal → SIGTERM/SIGKILL | HTTP disconnect | `kill {pid}` inside container |
+| Failure | logged, other servers continue | logged, other servers continue | `McpServerFailed` event emitted |
+
+Failed servers are logged but do **not** block other servers from starting or the agent from running.
+
+---
+
+## 11. Key Source Files
 
 | File | Purpose |
 |---|---|
@@ -385,4 +467,10 @@ RUN START
 | `lib/crates/fabro-workflow/src/pipeline/finalize.rs` | Container stop (lines 505–518) |
 | `lib/crates/fabro-workflow/src/handler/parallel.rs` | Parallel execution (lines 241–450) |
 | `lib/crates/fabro-workflow/src/error.rs` | Error categories and retry logic |
+| `lib/crates/fabro-mcp/src/client.rs` | MCP client — stdio/http/sse transport setup and tool calls |
+| `lib/crates/fabro-mcp/src/connection_manager.rs` | Multi-server manager, qualified tool names, routing |
+| `lib/crates/fabro-mcp/src/sse_client.rs` | SSE transport implementation |
+| `lib/crates/fabro-types/src/settings/run.rs` | `McpTransport` / `McpHttpProtocol` / `McpServerSettings` types |
+| `lib/crates/fabro-agent/src/session.rs:705` | `resolve_sandbox_mcp_servers` — Sandbox→Http resolution |
+| `lib/crates/fabro-agent/src/mcp_integration.rs` | Converts MCP tools into `RegisteredTool` for the agent |
 | `docs/public/administration/sandboxing.mdx` | User-facing documentation |
