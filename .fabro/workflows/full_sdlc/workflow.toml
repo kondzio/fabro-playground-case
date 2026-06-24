@@ -1,0 +1,17 @@
+_version = 1
+
+[workflow]
+graph = "full_sdlc.fabro"
+
+[run]
+goal = "Run the full SDLC workflow for a Jira issue"
+
+[run.inputs]
+issue_key = "EPMGPOCPG-320"
+
+[run.environment]
+id = "docker"
+
+[environments.docker]
+provider = "docker"
+

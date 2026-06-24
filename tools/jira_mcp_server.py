@@ -16,6 +16,24 @@ class JiraClient:
         base_url = (os.environ.get("JIRA_BASE_URL") or os.environ.get("JIRA_BASE_PATH") or "").rstrip("/")
         email = os.environ.get("JIRA_EMAIL", "")
         token = os.environ.get("JIRA_API_TOKEN", "")
+
+        # If any is missing/redacted, try to load from .fabro/project.toml
+        if not os.environ.get("PYTEST_CURRENT_TEST") and (not base_url or not email or not token or token == "REDACTED" or base_url == "REDACTED" or email == "REDACTED"):
+            try:
+                import toml
+                proj_toml_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".fabro", "project.toml")
+                if os.path.exists(proj_toml_path):
+                    config = toml.load(proj_toml_path)
+                    env_config = config.get("run", {}).get("agent", {}).get("mcps", {}).get("jira", {}).get("env", {})
+                    if not base_url or base_url == "REDACTED":
+                        base_url = env_config.get("JIRA_BASE_URL", base_url).rstrip("/")
+                    if not email or email == "REDACTED":
+                        email = env_config.get("JIRA_EMAIL", email)
+                    if not token or token == "REDACTED":
+                        token = env_config.get("JIRA_API_TOKEN", token)
+            except Exception:
+                pass
+
         missing = []
         if not base_url:
             missing.append("JIRA_BASE_URL")
@@ -129,10 +147,15 @@ def jira_get_subtasks(key: str) -> str:
     """Get all subtasks of a Jira ticket."""
     if not re.match(r'^[A-Z][A-Z0-9_]+-\d+$', key):
         return f"Error: Invalid ticket key format: '{key}'. Expected format: PROJECT-123."
-    jql = f"parent = {key} AND issueType in (subtask, sub-task, 'sub task')"
+    jql = f"parent = {key} OR 'Epic Link' = {key}"
     result = _client.request("GET", "search", params={"jql": jql, "maxResults": 50})
     if isinstance(result, str):
-        return result
+        # Fallback to standard parent search to avoid "Epic Link" field errors if it's not present
+        jql_fallback = f"parent = {key}"
+        result_fallback = _client.request("GET", "search", params={"jql": jql_fallback, "maxResults": 50})
+        if isinstance(result_fallback, str):
+            return result
+        return json.dumps(result_fallback)
     return json.dumps(result)
 
 
@@ -280,6 +303,36 @@ def jira_get_fix_versions(project: str) -> str:
     if isinstance(result, str):
         return result
     return json.dumps(result)
+
+
+@mcp.tool()
+def jira_update_ticket(key: str, body: str) -> str:
+    """Update a Jira ticket using Jira REST API JSON format.
+    Pass body as a JSON string. Example: '{\"fields\": {\"customfield_12700\": \"AC text\"}}'"""
+    try:
+        parsed = json.loads(body)
+    except (json.JSONDecodeError, ValueError) as e:
+        return f"Error: Invalid JSON body: {e}"
+    result = _client.request("PUT", f"issue/{key}", json=parsed)
+    if isinstance(result, str) and result.startswith("Error"):
+        return result
+    return f"Ticket {key} updated successfully."
+
+
+@mcp.tool()
+def jira_add_label(key: str, label: str) -> str:
+    """Add a label to a Jira ticket."""
+    body = {
+        "update": {
+            "labels": [
+                {"add": label}
+            ]
+        }
+    }
+    result = _client.request("PUT", f"issue/{key}", json=body)
+    if isinstance(result, str) and result.startswith("Error"):
+        return result
+    return f"Label '{label}' added to ticket {key} successfully."
 
 
 if __name__ == "__main__":

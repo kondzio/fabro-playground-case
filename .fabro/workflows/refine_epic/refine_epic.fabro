@@ -1,0 +1,49 @@
+digraph RefineEpic {
+    graph [goal="Fetch a Jira epic by key, refine it, and write it back to the ticket"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    fetch [
+        label="Fetch",
+        prompt="Fetch the Jira epic {{ inputs.issue_key }} using the jira_get_ticket tool. Also call jira_get_subtasks and jira_get_comments for the same key.\n\nCreate the process/{{ inputs.issue_key }}/input/ directory if it does not exist.\n\nWrite process/{{ inputs.issue_key }}/input/request.md with the following sections:\n- Key, Summary, Issue Type, Status\n- Story Points (customfield_10004)\n- Refinement content (customfield_12700)\n- User Story (customfield_34834)\n- Description\n- ## Children — for each child issue returned by jira_get_subtasks: Key, Summary, Description\n\nWrite process/{{ inputs.issue_key }}/input/comments.md with all comments: for each comment write the author display name and the comment body."
+    ]
+
+    refine [
+        label="Refine Epic",
+        shape=tab,
+        prompt="Your task is to produce a comprehensive epic refinement document covering all dimensions below.\n\nRead all files in the process/{{ inputs.issue_key }}/input/ folder:\n- process/{{ inputs.issue_key }}/input/request.md — full epic details, existing refinement content, User Story, child stories\n- process/{{ inputs.issue_key }}/input/comments.md — comment history with context and prior decisions\n- process/{{ inputs.issue_key }}/existing_questions.json — if present, treat answered questions as binding requirements\n- any other files in process/{{ inputs.issue_key }}/input/ — treat as attachments or references\n\nUse the information gathered to write the final output to process/{{ inputs.issue_key }}/outputs/response.md (create the process/{{ inputs.issue_key }}/outputs/ directory if it does not exist).\n\nMANDATORY OUTPUT SHAPE — include all sections in this exact order:\n*Story Points:*\n*Business Context:*\n*User Story:*\n*Acceptance Criteria:*\n*Business Rules:*\n*Out of Scope:*\n\nDo not skip any section. If a section has no confirmed details, write:\n- Not identified from available context.\n\nUI & visual quality requirements — include all of the following whenever the story touches any UI component:\n- All interactive elements (buttons, links, inputs) must have clearly visible focus and hover states with sufficient contrast.\n- Text and icon colours must meet WCAG AA contrast ratio (minimum 4.5:1 for normal text, 3:1 for large text/icons) against their background. No grey-on-white or light-on-light combinations unless contrast ratio is verified.\n- Placeholder text in inputs must be visually distinct from entered text but still readable (minimum 3:1 contrast against input background).\n- All colour and typography choices must follow the project style guide or design tokens; no ad-hoc hex values."
+    ]
+
+    update_jira [
+        label="Update Jira",
+        prompt="Read process/{{ inputs.issue_key }}/outputs/response.md. Call jira_update_ticket with key {{ inputs.issue_key }} and body as a JSON string: '{\"fields\": {\"customfield_12700\": \"<refinement content>\"}}'.\n\nReplace <refinement content> with the full content you read from process/{{ inputs.issue_key }}/outputs/response.md. Escape any quotes inside the content so the JSON string remains valid."
+    ]
+
+    label_success [
+        label="Label Success",
+        prompt="Call jira_add_label with key {{ inputs.issue_key }} and label 'refinment_success' to mark the epic as successfully refined."
+    ]
+
+    label_failure [
+        label="Label Failure",
+        prompt="Call jira_add_label with key {{ inputs.issue_key }} and label 'refinment_failure' to mark the epic as failed to refine."
+    ]
+
+    outcome [
+        label="Outcome",
+        prompt="State whether refinement for {{ inputs.issue_key }} succeeded or failed based on what labels were applied."
+    ]
+
+    start -> fetch
+    fetch -> refine [condition="outcome=succeeded"]
+    fetch -> label_failure
+    refine -> update_jira [condition="outcome=succeeded"]
+    refine -> label_failure
+    update_jira -> label_success [condition="outcome=succeeded"]
+    update_jira -> label_failure
+    label_success -> outcome
+    label_failure -> outcome
+    outcome -> exit
+}
