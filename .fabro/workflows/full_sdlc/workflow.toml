@@ -10,8 +10,8 @@ goal = "Run the full SDLC workflow for a Jira issue"
 issue_key = "EPMGPOCPG-320"
 
 [run.environment]
-id = "local"
+id = "docker"
 
-[environments.local]
-provider = "local"
+[environments.docker]
+provider = "docker"
 
