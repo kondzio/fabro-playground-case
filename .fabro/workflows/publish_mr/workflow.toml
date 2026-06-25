@@ -1,16 +1,13 @@
 _version = 1
 
 [workflow]
-graph = "full_sdlc.fabro"
+graph = "publish_mr.fabro"
 
 [run]
-goal = "Run the full SDLC workflow for a Jira issue"
+goal = "Generate summary.md and publish it as a GitLab MR"
 
 [run.inputs]
 issue_key = "EPMGPOCPG-320"
-
-[run.agent]
-fabro_tools = true
 
 [run.environment]
 id = "docker"

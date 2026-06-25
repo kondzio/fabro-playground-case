@@ -1,0 +1,56 @@
+digraph PublishMr {
+    graph [goal="Clone GitLab repo, generate summary.md from Jira and refine_epic output, commit to a new branch, and open a GitLab MR"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare,  label="Exit"]
+
+    clone_repo [
+        label="Clone Repo",
+        prompt="Construct the GitLab HTTPS clone URL from environment variables:\n- Strip 'https://' from $GITLAB_BASE_URL to get the hostname\n- Build URL: https://oauth2:${GITLAB_API_TOKEN}@<hostname>/${GITLAB_PROJECT_PATH}.git\n\nRun:\n  git clone https://oauth2:${GITLAB_API_TOKEN}@<hostname>/${GITLAB_PROJECT_PATH}.git /tmp/publish-mr-{{ inputs.issue_key }}\n\nThen configure git identity inside the cloned repo:\n  cd /tmp/publish-mr-{{ inputs.issue_key }}\n  git config user.email \"fabro-bot@fabro.local\"\n  git config user.name \"Fabro Bot\""
+    ]
+
+    generate_summary [
+        label="Generate Summary",
+        shape=tab,
+        prompt="Read the following files from the workspace:\n- process/{{ inputs.issue_key }}/input/request.md — raw Jira issue data (key, summary, description, user story, children)\n- process/{{ inputs.issue_key }}/outputs/response.md — refined epic output (business context, user story, acceptance criteria, business rules, out of scope)\n\nSynthesize a summary.md with these sections in order:\n# SDLC Summary: {{ inputs.issue_key }}\n**Issue Key:** {{ inputs.issue_key }}\n**Title:** <Summary field from request.md>\n## Business Context\n## User Story\n## Acceptance Criteria\n## Key Decisions\n\nPopulate each section from the corresponding section in response.md. For Key Decisions, include any binding requirements from business rules or comments.\n\nWrite the file to two locations (create directories if they do not exist):\n1. process/{{ inputs.issue_key }}/outputs/summary.md\n2. /tmp/publish-mr-{{ inputs.issue_key }}/docs/sdlc/{{ inputs.issue_key }}/summary.md"
+    ]
+
+    publish [
+        label="Publish",
+        prompt="Run the following commands from /tmp/publish-mr-{{ inputs.issue_key }}:\n\n1. Generate a timestamped branch name and save it:\n   BRANCH=\"sdlc/{{ inputs.issue_key }}-$(date +%Y%m%d-%H%M%S)\"\n   echo $BRANCH\n\n2. Create and switch to the new branch:\n   git checkout -b $BRANCH\n\n3. Stage and commit the summary file:\n   git add docs/sdlc/{{ inputs.issue_key }}/summary.md\n   git commit -m \"chore: add SDLC summary for {{ inputs.issue_key }}\"\n\n4. Push the branch to origin:\n   git push origin $BRANCH\n\n5. Save the branch name back to the workspace (not to the cloned repo):\n   echo $BRANCH > /workspace/process/{{ inputs.issue_key }}/outputs/branch_name.txt"
+    ]
+
+    create_mr [
+        label="Create MR",
+        prompt="Read the branch name from process/{{ inputs.issue_key }}/outputs/branch_name.txt.\nRead the title line from process/{{ inputs.issue_key }}/outputs/summary.md (the **Title:** line).\nRead the full content of process/{{ inputs.issue_key }}/outputs/summary.md.\n\nRun `echo $GITLAB_TARGET_BRANCH` to resolve the target branch value from the environment.\n\nCall gitlab_create_mr with:\n- source_branch: <branch name from branch_name.txt>\n- target_branch: <value from the echo command above>\n- title: \"SDLC: {{ inputs.issue_key }} — <title value>\"\n- description: <full content of summary.md>"
+    ]
+
+    label_success [
+        label="Label Success",
+        prompt="Call jira_add_label with key {{ inputs.issue_key }} and label 'publish_mr_success' to mark the MR as successfully published."
+    ]
+
+    label_failure [
+        label="Label Failure",
+        prompt="Call jira_add_label with key {{ inputs.issue_key }} and label 'publish_mr_failure' to mark the MR as failed to publish."
+    ]
+
+    outcome [
+        label="Outcome",
+        prompt="State whether the MR was created successfully for {{ inputs.issue_key }}. If successful, include the MR URL returned by gitlab_create_mr. If failed, state which step failed and why."
+    ]
+
+    start          -> clone_repo
+    clone_repo     -> generate_summary [condition="outcome=succeeded"]
+    clone_repo     -> label_failure
+    generate_summary -> publish        [condition="outcome=succeeded"]
+    generate_summary -> label_failure
+    publish        -> create_mr        [condition="outcome=succeeded"]
+    publish        -> label_failure
+    create_mr      -> label_success    [condition="outcome=succeeded"]
+    create_mr      -> label_failure
+    label_success  -> outcome
+    label_failure  -> outcome
+    outcome        -> exit
+}
