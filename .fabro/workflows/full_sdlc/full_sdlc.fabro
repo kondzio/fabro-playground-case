@@ -12,15 +12,7 @@ digraph FullSdlc {
         label="Refinement Quality Gate"
     ]
 
-    publish_mr [
-        label="Publish MR",
-        prompt="Create and supervise a child run for the publish_mr workflow.\n\n1. Call fabro_run_create with workflow='publish_mr', inputs={\"issue_key\": \"{{ inputs.issue_key }}\"}, auto_approve=true, start=true.\n2. Call fabro_run_gather with the returned run ID and timeout_seconds=600.\n3. Call fabro_run_get to inspect the final state and report whether the MR was created successfully."
-    ]
-
-    label_success [
-        label="Label Success",
-        prompt="Call jira_add_label with key {{ inputs.issue_key }} and label 'full_sdlc_approved'."
-    ]
+    publish_mr [import="../publish_mr/publish_mr.fabro"]
 
     label_failure [
         label="Label Failure",
@@ -29,11 +21,9 @@ digraph FullSdlc {
 
     start        -> refine_epic
     refine_epic  -> quality_gate
-    quality_gate -> publish_mr    [label="[A] Approve"]
+    quality_gate -> publish_mr
     quality_gate -> label_failure [label="[R] Reject"]
     quality_gate -> refine_epic   [label="[T] Retry"]
-    publish_mr   -> label_success [condition="outcome=succeeded"]
-    publish_mr   -> label_failure
-    label_success -> exit
+    publish_mr   -> exit
     label_failure -> exit
 }
