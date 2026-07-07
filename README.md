@@ -176,7 +176,7 @@ The Fabro server uses the `GEMINI_API_KEY` environment variable to access Google
 
 ### Current Configuration
 
-- **Server**: `https://fabro.ai-x-a-accelerate.lab.epam.com`
+- **Server**: `https://fabro.aixa.lab.epam.com`
 - **Cluster**: AWS EKS `epam-gpoc-eks` (us-east-1, account `711156763240`)
 - **Egress IP**: `44.220.89.190` (NAT Gateway Elastic IP)
 - **GCP Project**: `711156763240`
