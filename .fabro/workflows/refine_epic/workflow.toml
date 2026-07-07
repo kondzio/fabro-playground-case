@@ -10,7 +10,4 @@ goal = "Refine Jira Epic"
 issue_key = "EPMGPOCPG-320"
 
 [run.environment]
-id = "local"
-
-[environments.local]
-provider = "local"
+id = "docker"
